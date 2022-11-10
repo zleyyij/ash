@@ -44,7 +44,7 @@ fn main() {
         //             exec_process(parsed_user_input[0], args, &current_directory);
         // }
         //     }
-        handle_input(parsed_user_input, &current_directory);
+        current_directory = handle_input(parsed_user_input, &current_directory);
         //assume nothing went wrong if we reach this point
     }
 
@@ -67,17 +67,15 @@ fn main() {
         if !return_tuple.0 {
             return return_tuple;
         }
-
         match command {
             "test" => println!("test"),
             "cd" => {
-                // if Path::new(inpt[1]).exists() {
-                //          //set the new path
-                //          return_tuple.1 = inpt[1].to_owned();
-                //      } else {
-                //          println!("Directory not found, looked for: {}", inpt[1]);
-                //      }
-                return_tuple.1 = inpt[1].to_owned();
+                if inpt.len() > 1 {
+                    //if Path::new(inpt[1]).exists() {
+                    //set the new path
+                    return_tuple.1 = inpt[1].to_owned();
+                    //}
+                }
             }
             _ => return return_tuple,
         };
@@ -96,11 +94,9 @@ fn main() {
     }
 
     //start system processes
-    pub fn exec_process(
-        process: &str,
-        args: Vec<&str>,
-        current_dir: &String,
-    ) -> Option<std::process::ExitStatus> {
+    pub fn exec_process(process: &str, args: Vec<&str>, current_dir: &String) {
+        //don't touch stdio if there isn't anything to do
+
         let new_process = Command::new(process)
             .args(args)
             .current_dir(current_dir)
@@ -112,18 +108,42 @@ fn main() {
                 None
             }
         };
+    }
 
-        if new_process != None {
-            let new_process: std::process::ExitStatus = new_process.unwrap();
-            //println!();
-            return Some(new_process);
-        }
-        None
+    //handle stuff like `ls | grep blah`
+    pub fn exec_processes_with_pipes(processes_to_handle: Vec<Vec<&str>>, current_dir: String) {
+        //https://stackoverflow.com/questions/63935315/how-to-send-input-to-stdin-of-a-process-created-with-command-and-then-capture-ou
+        let mut destination_process = Command::new(processes_to_handle[1][0])
+            .current_dir(&current_dir)
+            
+            .args(processes_to_handle[0][1..].to_vec())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            //should be removed later, assumes the process exists and executes correctly
+            .unwrap();
+            let _source_process = Command::new(processes_to_handle[0][0])
+            .current_dir(current_dir)
+            .args(processes_to_handle[1][1..].to_vec())
+            .stdout(destination_process.stdin.take().unwrap())
+            .spawn()
+            .unwrap();
+            //destination process output
+            let destination_process_output = destination_process.wait_with_output().unwrap();
+
+            //print stdout
+            match destination_process_output.status.code() {
+                Some(0) => {println!("{}", String::from_utf8_lossy(&destination_process_output.stdout));return},
+                Some(code) => println!("Error: {}", code),
+                None => {}
+            }   
+            // should also be removed\
+
     }
 
     // Spltting the user input up, running necessary commands, redirecting and piping stdio, general
     // processing
-    pub fn handle_input(input_as_vec: Vec<&str>, current_dir: &String) {
+    pub fn handle_input(input_as_vec: Vec<&str>, current_dir: &String) -> String {
         // every item but the first one
         //let mut args = parsed_user_input.clone();
         //args.remove(0);
@@ -146,9 +166,9 @@ fn main() {
         //take everything before it as a command
         //then put each into the arrays and remove from the input vec
 
-        for i in control_chars_list {
-            while input_vec.len() > 0 {
-                let index_of_control_char = input_vec.iter().position(|&x| x == i.to_string());
+        while input_vec.len() > 0 {
+            for i in control_chars_list {
+                let index_of_control_char = input_vec.iter().position(|&x| x == i);
                 //if a control char exists, take everything before it as a command
                 //take the char itself and dump it in an array
                 match index_of_control_char {
@@ -165,53 +185,71 @@ fn main() {
                     None => {
                         //we assume there are no control chars here,
                         //and dump the entire vec into the command vector
-                        commands.push(input_vec.clone());
-                        control_chars.push(None);
-                        input_vec = vec![];
+                        //if we've reached the end of the list
+                        if i == control_chars_list[control_chars_list.len() - 1] {
+                            commands.push(input_vec.clone());
+                            control_chars.push(None);
+                            input_vec = vec![];
+                        }
                     }
                 }
             }
         }
 
+        //change current dir if new dir was found with the cd command
+        let mut current_dir = current_dir.clone();
         //loop through the arrays of processed input, and handle accordingly
-        for i in 0..control_chars.len() {
+
+        for i in 0..control_chars.len() - 1 {
+        
+            let mut args = commands[i].clone();
+            args.remove(0);
             match control_chars[i] {
                 None => {
-                    let mut args = commands[i].clone();
-                    args.remove(0);
+                    //this is a tad jank, only if no builtin process found do you check for system processes
+                    //tuple containing all useful information for the builtin commands
+                    let builtin_tuple = exec_builtin(commands[i].clone());
+
+                    //make sure it's not a blank string
+                    if builtin_tuple.1 != String::new() {
+                        // if relative path, append to current path
+                        // if absolute change entire path
+                        if Path::new(&builtin_tuple.1).is_absolute() {
+                            current_dir = prettify_path(&builtin_tuple.1);
+                        } else if Path::new(format!("{}/{}", current_dir, builtin_tuple.1).as_str())
+                            .exists()
+                        {
+                            current_dir = prettify_path(
+                                &format!("{}/{}", current_dir, builtin_tuple.1).to_string(),
+                            );
+                        } else {
+                            println!("Directory not found, looked for: {}", builtin_tuple.1);
+                        }
+                    }
+                    if builtin_tuple.0 == false {
+                        exec_process(commands[i][0], args, &current_dir);
+                    }
+                }
+                Some("|") => {
+                    //pipe the current process's stdout into the next process's stdin
+                    exec_processes_with_pipes(vec![commands[i].clone(), commands[i+1].clone()], current_dir.clone());
+                }
+                Some(";") => {
                     exec_process(commands[i][0], args, &current_dir);
                 }
-                Some("|") => {}
+                Some(">") => {
+                    println!("Found >");
+                }
                 Some(_) => {
                     panic!("wtf happened");
                 }
             }
         }
-
-        //this is a tad jank, only if no builtin process found do you check for system processes
-        //tuple containing all useful information for the builtin commands
-        let builtin_tuple = exec_builtin(input_as_vec.clone());
-
-        //change current dir if new dir was found with the cd command
-        let mut current_dir = current_dir.clone();
-
-        if builtin_tuple.1 != String::new() {
-            // if relative path, append to current path
-            // if absolute change entire path
-            if Path::new(&builtin_tuple.1).is_absolute() {
-                current_dir = prettify_path(&builtin_tuple.1);
-            } else if Path::new(format!("{}/{}", current_dir, builtin_tuple.1).as_str()).exists() {
-                current_dir =
-                    prettify_path(&format!("{}/{}", current_dir, builtin_tuple.1).to_string());
-            } else {
-                println!("Directory not found, looked for: {}", builtin_tuple.1);
-            }
-        }
-        if builtin_tuple.0 == false {
-            //   exec_process(parsed_user_input[0], args, &current_directory);
-        }
+        return current_dir;
     }
 }
+
+
 
 //take a "messy" path and clean it up all nice and neat
 //eg: //./home/../home/./. is technically valid

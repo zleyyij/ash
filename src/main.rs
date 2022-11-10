@@ -113,18 +113,21 @@ fn main() {
     //handle stuff like `ls | grep blah`
     pub fn exec_processes_with_pipes(processes_to_handle: Vec<Vec<&str>>, current_dir: String) {
         //https://stackoverflow.com/questions/63935315/how-to-send-input-to-stdin-of-a-process-created-with-command-and-then-capture-ou
+        
         let mut destination_process = Command::new(processes_to_handle[1][0])
             .current_dir(&current_dir)
             
-            .args(processes_to_handle[0][1..].to_vec())
+            .args(processes_to_handle[1][1..].to_vec())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
             //should be removed later, assumes the process exists and executes correctly
             .unwrap();
+
+
             let _source_process = Command::new(processes_to_handle[0][0])
             .current_dir(current_dir)
-            .args(processes_to_handle[1][1..].to_vec())
+            .args(processes_to_handle[0][1..].to_vec())
             .stdout(destination_process.stdin.take().unwrap())
             .spawn()
             .unwrap();
@@ -133,7 +136,7 @@ fn main() {
 
             //print stdout
             match destination_process_output.status.code() {
-                Some(0) => {println!("{}", String::from_utf8_lossy(&destination_process_output.stdout));return},
+                Some(0) => println!("{}", String::from_utf8_lossy(&destination_process_output.stdout)),
                 Some(code) => println!("Error: {}", code),
                 None => {}
             }   
@@ -199,8 +202,11 @@ fn main() {
         //change current dir if new dir was found with the cd command
         let mut current_dir = current_dir.clone();
         //loop through the arrays of processed input, and handle accordingly
-
-        for i in 0..control_chars.len() - 1 {
+        //I don't know why this works or why it's an issue in the first place, leave me alone
+        if control_chars.len() > 1 {
+            control_chars.pop();
+        }
+        for i in 0..control_chars.len() {
         
             let mut args = commands[i].clone();
             args.remove(0);

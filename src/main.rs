@@ -48,7 +48,9 @@ pub fn exec_builtin(inpt: Vec<&str>) -> (bool, String) {
         return return_tuple;
     }
     match command {
-        "test" => println!("test"),
+        "test" => {
+            println!("test")
+        }
         "cd" => {
             if inpt.len() > 1 {
                 //if Path::new(inpt[1]).exists() {
@@ -87,7 +89,7 @@ pub fn exec_process(process: &str, args: Vec<&str>, current_dir: &String) {
     match new_process {
         Ok(prcs) => Some(prcs),
         Err(_error) => {
-            println!("Command not found");
+            println!("Ash: Command not found");
             None
         }
     };
@@ -97,32 +99,38 @@ pub fn exec_process(process: &str, args: Vec<&str>, current_dir: &String) {
 pub fn exec_processes_with_pipes(processes_to_handle: Vec<Vec<&str>>, current_dir: String) {
     //https://stackoverflow.com/questions/63935315/how-to-send-input-to-stdin-of-a-process-created-with-command-and-then-capture-ou
 
-    let mut destination_process = Command::new(processes_to_handle[1][0])
+    let destination_process = Command::new(processes_to_handle[1][0])
         .current_dir(&current_dir)
         .args(processes_to_handle[1][1..].to_vec())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .spawn()
-        //should be removed later, assumes the process exists and executes correctly
-        .unwrap();
-
-    let _source_process = Command::new(processes_to_handle[0][0])
-        .current_dir(current_dir)
-        .args(processes_to_handle[0][1..].to_vec())
-        .stdout(destination_process.stdin.take().unwrap())
-        .spawn()
-        .unwrap();
-    //destination process output
-    let destination_process_output = destination_process.wait_with_output().unwrap();
-
-    //print stdout
-    match destination_process_output.status.code() {
-        Some(0) => println!(
-            "{}",
-            String::from_utf8_lossy(&destination_process_output.stdout)
-        ),
-        Some(code) => println!("Error: {}", code),
-        None => {}
+        .spawn();
+    match destination_process {
+        Ok(_) => {
+            let mut destination_process = destination_process.unwrap();
+            let _source_process = Command::new(processes_to_handle[0][0])
+                .current_dir(current_dir)
+                .args(processes_to_handle[0][1..].to_vec())
+                .stdout(destination_process.stdin.take().unwrap())
+                .spawn()
+                .unwrap();
+            //destination process output
+            let destination_process_output = destination_process.wait_with_output().unwrap();
+            //print stdout
+            match destination_process_output.status.code() {
+                Some(0) => println!(
+                    "{}",
+                    String::from_utf8_lossy(&destination_process_output.stdout)
+                ),
+                Some(code) => println!("Error: {}", code),
+                None => {}
+            }
+        }
+        Err(_) => {
+            println!(
+                "Ash: Unable to start a process"
+            );
+        }
     }
     // should also be removed\
 }
@@ -166,14 +174,13 @@ fn parse_user_input(user_input: String) -> Vec<String> {
                 //wipe the buffer
                 user_input_buf.drain(..);
                 input_string.remove(0);
-            },
+            }
             //same thing as spaces but we add the character instead of dropping it
             '|' | ';' | '>' => {
                 parsed_user_input.push(user_input_buf.clone().into_iter().collect::<String>());
                 parsed_user_input.push(String::from(input_string.remove(0)));
                 user_input_buf.drain(..);
-                
-            },
+            }
             _ => {
                 user_input_buf.push(input_string.chars().next().unwrap());
                 input_string.remove(0);
@@ -182,7 +189,6 @@ fn parse_user_input(user_input: String) -> Vec<String> {
     }
     //assume that if there's no formatting characters (" ", ") than it's a whole commanderino
     parsed_user_input.push(user_input_buf.clone().into_iter().collect::<String>());
-    
 
     //cleanup all the blank strings created
     let mut fully_polished_user_input = parsed_user_input.clone();
@@ -191,7 +197,6 @@ fn parse_user_input(user_input: String) -> Vec<String> {
             fully_polished_user_input.remove(i);
         }
     }
-    println!("{:#?}", fully_polished_user_input);
     fully_polished_user_input
 }
 

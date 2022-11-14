@@ -186,12 +186,12 @@ fn parse_user_input(user_input: String) -> Vec<String> {
 
     //cleanup all the blank strings created
     let mut fully_polished_user_input = parsed_user_input.clone();
-    for i in (0..fully_polished_user_input.len() - 1).rev() {
+    for i in (0..fully_polished_user_input.len()).rev() {
         if fully_polished_user_input[i] == "" {
             fully_polished_user_input.remove(i);
         }
     }
-
+    println!("{:#?}", fully_polished_user_input);
     fully_polished_user_input
 }
 

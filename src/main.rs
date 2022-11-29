@@ -1,12 +1,20 @@
-use std::cell::RefCell;
 use std::fs::canonicalize;
-use std::io::{self, Write};
+use std::io::{self, stdout, Write};
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::{self, Command, Stdio};
 //third party crates
+use crossterm::{
+    cursor,
+    event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
+    execute, terminal, Result,
+};
 
 fn main() {
-    println!("Loaded");
+
+    println!("Loaded\r");
+    //this may be a terrible idea and crash everything
+    
+    println!("{:?}", stdout());
     // the string that stores stdin
     let mut user_input: String;
     let mut current_directory = String::from("/");
@@ -17,9 +25,13 @@ fn main() {
         //get user input as a string and strip the newline character
 
         let prompt = String::from(format!("[{}]> ", current_directory));
-        user_input = read_input(prompt);
+        terminal::enable_raw_mode().expect("Failed to enter raw mode");
+        user_input = read_input(prompt).unwrap();
+        terminal::disable_raw_mode().expect("failed to exit raw mode after processing user input");
+        print!("\r");
+        stdout().flush().unwrap();
         // remove newline character so that it doesn't get passed as an argument
-        user_input.truncate(user_input.len() - 1);
+        //user_input.truncate(user_input.len() - 1);
         let parsed_user_input: Vec<String> = parse_user_input(user_input);
         //rust is quirky about the ownership of &str, so it's hard to pass it from a function, so we convert to and from a str
         let parsed_user_input: Vec<&str> = parsed_user_input.iter().map(|s| s as &str).collect();
@@ -51,6 +63,12 @@ pub fn exec_builtin(inpt: Vec<&str>) -> (bool, String) {
         "test" => {
             println!("test")
         }
+        "exit" => {
+            println!("\rCleaning up and disabling raw mode.");
+            terminal::disable_raw_mode().expect("Failed to leave raw mode, force exiting");
+            println!("\rSuccessfully left raw mode, exiting now.");
+            process::exit(0);
+        }
         "cd" => {
             if inpt.len() > 1 {
                 //if Path::new(inpt[1]).exists() {
@@ -65,34 +83,151 @@ pub fn exec_builtin(inpt: Vec<&str>) -> (bool, String) {
     return return_tuple;
 }
 
+pub fn read_key() -> Result<KeyCode> {
+    loop {
+        if let Event::Key(KeyEvent {
+            code,
+        
+            ..
+        }) = event::read()?
+        {
+            return Ok(code);
+        }
+    }
+}
+
 // obtain standard input as a string
-fn read_input(prompt: String) -> String {
+fn read_input(prompt: String) -> Result<String> {
+    let mut stdout = stdout();
     let mut input = String::new();
     print!("{}", prompt);
-    //ensure output is printed immediately
-    io::stdout().flush().unwrap();
-    let stdin = io::stdin();
-    stdin.read_line(&mut input).unwrap();
-    input
+    //force the stdout to flush the line buffer on time
+    stdout.flush().unwrap();
+
+    //modifier keys
+    while let Event::Key(KeyEvent {
+        modifiers: KeyModifiers,
+        code,
+        ..
+    }) = event::read()?
+    {
+        match KeyModifiers {
+            KeyModifiers::CONTROL => {
+                if code == KeyCode::Char('c') {
+                    stdout.flush()?;
+                }
+            }
+            _ => {}
+        }
+        match code {
+            KeyCode::Enter => {
+                println!();
+                break;
+            },
+            KeyCode::Backspace => {
+
+                print!("\u{8}");
+                print!(" ");
+                print!("\u{8}");
+                stdout.flush()?;
+                input.pop();
+
+            },
+            KeyCode::Left => {
+
+            },
+            //move the cursor left and right
+            KeyCode::Left => {
+                execute!(stdout, cursor::MoveLeft(1));
+                stdout.flush()?;
+              
+            }
+            KeyCode::Right => {
+                crossterm::cursor::MoveRight(1);
+            }
+            KeyCode::Char(c) => {
+                //write the character to the stdout
+                print!("{}", c);
+                stdout.flush()?;
+
+                input.push(c);
+            }
+
+            _ => {}
+        }
+    }
+    Ok(input)
 }
 
 //start system processes
-pub fn exec_process(process: &str, args: Vec<&str>, current_dir: &String) {
+pub fn exec_process(process: &str, args: Vec<&str>, current_dir: &String) -> Result<()> {
     //don't touch stdio if there isn't anything to do
-
-    let new_process = Command::new(process)
+    let stdout = stdout();
+    let mut new_process = Command::new(process)
+        // .stdin(Stdio::piped())
+        // .stdout(Stdio::inherit())
         .args(args)
         .current_dir(current_dir)
-        .status();
+        .status().unwrap();
+    //     .spawn()?;
+    //    match new_process.stdout.take() {
+    //     Some(out) => {
+    //         stdout.write(out);
+    //     },
+    //     None => {}
+    //    }
+       
+    //NEEDS TO BE FIXED AT SOME POINT
+        
+    // write either write to stdin or intercept ctrl + c an exit the process
+    
+    // while let Event::Key(KeyEvent {
+    //     modifiers: KeyModifiers,
+    //     code,
+    //     ..
+    // }) = event::read().unwrap()
+    // {
+    //     match KeyModifiers {
+    //         KeyModifiers::CONTROL => {
+    //             if code == KeyCode::Char('c') {
+    //                 println!(
+    //                     "Ctrl + C detected, killing currently running process"
+    //                 );
+    //                 new_process.kill().expect("Failed to kill process, exiting");
+    //                 break;
+    //             }
+    //         }
+    //         _ => {}
+    
+    //     }
+   
+    // }
+    //     match code {
+    //         //I guess this matters if we need to handle passing characters to something
+    //         //but for now we comment it out
+    //         // KeyCode::Char(c) => {
+    //         //     print!("{}", c);
+    //         //     stdout().flush()?;
+    //         //     new_process
+    //         //         .stdin
+    //         //         .as_mut()
+    //         //         .unwrap()
+    //         //         .write(c.to_string().as_bytes())?;
+    //         }
+    //         _ => {}
+    //     }
+    // }
+    Ok(())
+
     //nuke the below line if everything still works
-    //let new_process: Option<std::process::ExitStatus> =
-    match new_process {
-        Ok(prcs) => Some(prcs),
-        Err(_error) => {
-            println!("Ash: Command not found");
-            None
-        }
-    };
+
+    // match new_process {
+    //     Ok(prcs) => Some(prcs),
+    //     Err(_error) => {
+    //         println!("Ash: Command not found");
+    //         None
+    //     }
+    // };
 }
 
 //handle stuff like `ls | grep blah`
@@ -127,9 +262,7 @@ pub fn exec_processes_with_pipes(processes_to_handle: Vec<Vec<&str>>, current_di
             }
         }
         Err(_) => {
-            println!(
-                "Ash: Unable to start a process"
-            );
+            println!("Ash: Unable to start a process");
         }
     }
     // should also be removed\
@@ -288,7 +421,7 @@ pub fn handle_input(input_as_vec: Vec<&str>, current_dir: &String) -> String {
                     }
                 }
                 if builtin_tuple.0 == false {
-                    exec_process(commands[i][0], args, &current_dir);
+                    exec_process(commands[i][0], args, &current_dir).unwrap();
                 }
             }
             Some("|") => {
@@ -299,7 +432,7 @@ pub fn handle_input(input_as_vec: Vec<&str>, current_dir: &String) -> String {
                 );
             }
             Some(";") => {
-                exec_process(commands[i][0], args, &current_dir);
+                exec_process(commands[i][0], args, &current_dir).unwrap();
             }
             Some(">") => {
                 println!("Found >");

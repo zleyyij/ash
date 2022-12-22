@@ -6,15 +6,15 @@ use std::process::{self, Command, Stdio};
 use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
-    execute, terminal, Result,
+    execute,
+    terminal::{self, ClearType},
+    Result,
 };
 
 fn main() {
-
     println!("Loaded\r");
-    //this may be a terrible idea and crash everything
-    
-    println!("{:?}", stdout());
+
+  
     // the string that stores stdin
     let mut user_input: String;
     let mut current_directory = String::from("/");
@@ -85,12 +85,7 @@ pub fn exec_builtin(inpt: Vec<&str>) -> (bool, String) {
 
 pub fn read_key() -> Result<KeyCode> {
     loop {
-        if let Event::Key(KeyEvent {
-            code,
-        
-            ..
-        }) = event::read()?
-        {
+        if let Event::Key(KeyEvent { code, .. }) = event::read()? {
             return Ok(code);
         }
     }
@@ -103,7 +98,10 @@ fn read_input(prompt: String) -> Result<String> {
     print!("{}", prompt);
     //force the stdout to flush the line buffer on time
     stdout.flush().unwrap();
-
+    
+    //the current location of the cursor
+    let mut current_cursor_index = usize::from(cursor::position()?.0);
+    //println!("Current cursor index: {}, prompt_len: {}", current_cursor_index, prompt.len());
     //modifier keys
     while let Event::Key(KeyEvent {
         modifiers: KeyModifiers,
@@ -111,6 +109,8 @@ fn read_input(prompt: String) -> Result<String> {
         ..
     }) = event::read()?
     {
+        //reset the current cursor index after each go
+        current_cursor_index = usize::from(cursor::position()?.0);
         match KeyModifiers {
             KeyModifiers::CONTROL => {
                 if code == KeyCode::Char('c') {
@@ -122,40 +122,85 @@ fn read_input(prompt: String) -> Result<String> {
         match code {
             KeyCode::Enter => {
                 println!();
+                //input = String::new();
                 break;
-            },
+            }
             KeyCode::Backspace => {
+                if current_cursor_index > prompt.len() {
+                    
+                    //cursor handling
+                    //current_cursor_index +=1;
+                    //jank fix IG?
+                    
+                    if current_cursor_index - prompt.len() == input.len() {
+                    input.pop();
+                    execute!(stdout, terminal::Clear(ClearType::CurrentLine));
+                    print!("\r{}{}", prompt, input);
+                    stdout.flush()?;
+                    } else {
+                    input.remove(current_cursor_index - prompt.len() - 1);
 
-                print!("\u{8}");
-                print!(" ");
-                print!("\u{8}");
-                stdout.flush()?;
-                input.pop();
+                    execute!(stdout, terminal::Clear(ClearType::CurrentLine));
+                    print!("\r{}{}", prompt, input);
+                    stdout.flush()?;
+                    let distance_to_move_back = 1 + input.len() + prompt.len() - current_cursor_index;
+                    execute!(
+                        stdout,
+                        cursor::MoveLeft(distance_to_move_back.try_into().unwrap())
+                    );
+                    }
+                    // print!("\u{8}");
+                    // print!(" ");
+                    // print!("\u{8}");
 
-            },
-            KeyCode::Left => {
+            }
+            }
 
-            },
             //move the cursor left and right
             KeyCode::Left => {
-                execute!(stdout, cursor::MoveLeft(1));
-                stdout.flush()?;
-              
+                //prevent the cursor from walking into the prompt
+                if current_cursor_index > prompt.len() {
+                    execute!(stdout, cursor::MoveLeft(1));
+                    //stdout.flush()?;
+                    //current_cursor_index -= 1;
+                }
             }
             KeyCode::Right => {
-                crossterm::cursor::MoveRight(1);
+                //current_cursor_index += 1;
+                if current_cursor_index < input.len() + prompt.len() {
+                execute!(stdout, cursor::MoveRight(1));
+                }
+                stdout.flush()?;
             }
             KeyCode::Char(c) => {
                 //write the character to the stdout
-                print!("{}", c);
-                stdout.flush()?;
 
-                input.push(c);
+                input.insert(current_cursor_index - prompt.len(), c);
+                //current_cursor_index += 1;
+
+                //this is to make it insert instead of overwriting
+                    execute!(stdout, terminal::Clear(ClearType::CurrentLine));
+                
+                //stdout.flush()?;
+                print!("\r{}{}", prompt, input);
+                let distance_to_move_back = input.len() + prompt.len() - (current_cursor_index + 1);
+                if current_cursor_index < input.len() + prompt.len() - 1 {
+                execute!(
+                    stdout,
+                    cursor::MoveLeft(distance_to_move_back.try_into().unwrap())
+                );
+            }
+                stdout.flush()?;
             }
 
             _ => {}
         }
     }
+
+
+
+
+
     Ok(input)
 }
 
@@ -168,7 +213,8 @@ pub fn exec_process(process: &str, args: Vec<&str>, current_dir: &String) -> Res
         // .stdout(Stdio::inherit())
         .args(args)
         .current_dir(current_dir)
-        .status().unwrap();
+        .status()
+        .unwrap();
     //     .spawn()?;
     //    match new_process.stdout.take() {
     //     Some(out) => {
@@ -176,11 +222,11 @@ pub fn exec_process(process: &str, args: Vec<&str>, current_dir: &String) -> Res
     //     },
     //     None => {}
     //    }
-       
+
     //NEEDS TO BE FIXED AT SOME POINT
-        
+
     // write either write to stdin or intercept ctrl + c an exit the process
-    
+
     // while let Event::Key(KeyEvent {
     //     modifiers: KeyModifiers,
     //     code,
@@ -198,9 +244,9 @@ pub fn exec_process(process: &str, args: Vec<&str>, current_dir: &String) -> Res
     //             }
     //         }
     //         _ => {}
-    
+
     //     }
-   
+
     // }
     //     match code {
     //         //I guess this matters if we need to handle passing characters to something

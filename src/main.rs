@@ -2,19 +2,20 @@ use std::fs::canonicalize;
 use std::io::{self, stdout, Write};
 use std::path::Path;
 use std::process::{self, Command, Stdio};
+use std::sync::mpsc::channel;
 //third party crates
 use crossterm::{
     cursor,
-    event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
+    event::{self, Event, KeyCode, KeyEvent, KeyModifiers, read, poll},
     execute,
     terminal::{self, ClearType},
     Result,
 };
+use ctrlc;
 
 fn main() {
     println!("Loaded\r");
 
-  
     // the string that stores stdin
     let mut user_input: String;
     let mut current_directory = String::from("/");
@@ -98,7 +99,7 @@ fn read_input(prompt: String) -> Result<String> {
     print!("{}", prompt);
     //force the stdout to flush the line buffer on time
     stdout.flush().unwrap();
-    
+
     //the current location of the cursor
     let mut current_cursor_index = usize::from(cursor::position()?.0);
     //println!("Current cursor index: {}, prompt_len: {}", current_cursor_index, prompt.len());
@@ -127,33 +128,32 @@ fn read_input(prompt: String) -> Result<String> {
             }
             KeyCode::Backspace => {
                 if current_cursor_index > prompt.len() {
-                    
                     //cursor handling
                     //current_cursor_index +=1;
                     //jank fix IG?
-                    
-                    if current_cursor_index - prompt.len() == input.len() {
-                    input.pop();
-                    execute!(stdout, terminal::Clear(ClearType::CurrentLine));
-                    print!("\r{}{}", prompt, input);
-                    stdout.flush()?;
-                    } else {
-                    input.remove(current_cursor_index - prompt.len() - 1);
 
-                    execute!(stdout, terminal::Clear(ClearType::CurrentLine));
-                    print!("\r{}{}", prompt, input);
-                    stdout.flush()?;
-                    let distance_to_move_back = 1 + input.len() + prompt.len() - current_cursor_index;
-                    execute!(
-                        stdout,
-                        cursor::MoveLeft(distance_to_move_back.try_into().unwrap())
-                    );
+                    if current_cursor_index - prompt.len() == input.len() {
+                        input.pop();
+                        execute!(stdout, terminal::Clear(ClearType::CurrentLine));
+                        print!("\r{}{}", prompt, input);
+                        stdout.flush()?;
+                    } else {
+                        input.remove(current_cursor_index - prompt.len() - 1);
+
+                        execute!(stdout, terminal::Clear(ClearType::CurrentLine));
+                        print!("\r{}{}", prompt, input);
+                        stdout.flush()?;
+                        let distance_to_move_back =
+                            1 + input.len() + prompt.len() - current_cursor_index;
+                        execute!(
+                            stdout,
+                            cursor::MoveLeft(distance_to_move_back.try_into().unwrap())
+                        );
                     }
                     // print!("\u{8}");
                     // print!(" ");
                     // print!("\u{8}");
-
-            }
+                }
             }
 
             //move the cursor left and right
@@ -168,7 +168,7 @@ fn read_input(prompt: String) -> Result<String> {
             KeyCode::Right => {
                 //current_cursor_index += 1;
                 if current_cursor_index < input.len() + prompt.len() {
-                execute!(stdout, cursor::MoveRight(1));
+                    execute!(stdout, cursor::MoveRight(1));
                 }
                 stdout.flush()?;
             }
@@ -179,27 +179,23 @@ fn read_input(prompt: String) -> Result<String> {
                 //current_cursor_index += 1;
 
                 //this is to make it insert instead of overwriting
-                    execute!(stdout, terminal::Clear(ClearType::CurrentLine));
-                
+                execute!(stdout, terminal::Clear(ClearType::CurrentLine));
+
                 //stdout.flush()?;
                 print!("\r{}{}", prompt, input);
                 let distance_to_move_back = input.len() + prompt.len() - (current_cursor_index + 1);
                 if current_cursor_index < input.len() + prompt.len() - 1 {
-                execute!(
-                    stdout,
-                    cursor::MoveLeft(distance_to_move_back.try_into().unwrap())
-                );
-            }
+                    execute!(
+                        stdout,
+                        cursor::MoveLeft(distance_to_move_back.try_into().unwrap())
+                    );
+                }
                 stdout.flush()?;
             }
 
             _ => {}
         }
     }
-
-
-
-
 
     Ok(input)
 }
@@ -209,13 +205,14 @@ pub fn exec_process(process: &str, args: Vec<&str>, current_dir: &String) -> Res
     //don't touch stdio if there isn't anything to do
     let stdout = stdout();
     let mut new_process = Command::new(process)
-        // .stdin(Stdio::piped())
-        // .stdout(Stdio::inherit())
+      //  .stdin(Stdio::inherit())
+        //.stdout(Stdio::inherit())
         .args(args)
         .current_dir(current_dir)
         .status()
         .unwrap();
-    //     .spawn()?;
+        //.spawn()?;
+        
     //    match new_process.stdout.take() {
     //     Some(out) => {
     //         stdout.write(out);
@@ -226,43 +223,55 @@ pub fn exec_process(process: &str, args: Vec<&str>, current_dir: &String) -> Res
     //NEEDS TO BE FIXED AT SOME POINT
 
     // write either write to stdin or intercept ctrl + c an exit the process
+ 
 
-    // while let Event::Key(KeyEvent {
-    //     modifiers: KeyModifiers,
-    //     code,
-    //     ..
-    // }) = event::read().unwrap()
-    // {
-    //     match KeyModifiers {
-    //         KeyModifiers::CONTROL => {
-    //             if code == KeyCode::Char('c') {
-    //                 println!(
-    //                     "Ctrl + C detected, killing currently running process"
-    //                 );
-    //                 new_process.kill().expect("Failed to kill process, exiting");
-    //                 break;
-    //             }
-    //         }
-    //         _ => {}
+  //  ctrlc::set_handler(move || if new_process.try_wait().unwrap().is_none() {new_process.kill().unwrap()}).expect("Error setting CTRL C handler");
 
-    //     }
+//    let Event::Key(KeyEvent {
+//         modifiers: KeyModifiers,
+//         code,
+//         ..
+//     }) = event::read().unwrap();
+    
+//         match KeyModifiers {
+//             KeyModifiers::CONTROL => {
+//                 if code == KeyCode::Char('c') {
+//                     println!(
+//                         "Ctrl + C detected, killing currently running process"
+//                     );
+//                     new_process.kill().expect("Failed to kill process, exiting");
+//                     break;
+//                 }
+//             }
+//             _ => {}
 
-    // }
-    //     match code {
-    //         //I guess this matters if we need to handle passing characters to something
-    //         //but for now we comment it out
-    //         // KeyCode::Char(c) => {
-    //         //     print!("{}", c);
-    //         //     stdout().flush()?;
-    //         //     new_process
-    //         //         .stdin
-    //         //         .as_mut()
-    //         //         .unwrap()
-    //         //         .write(c.to_string().as_bytes())?;
-    //         }
-    //         _ => {}
-    //     }
-    // }
+//         }
+    
+//         match code {
+//             //I guess this matters if we need to handle passing characters to something
+//             //but for now we comment it out
+//             KeyCode::Char(c) => {
+//                 print!("{}", c);
+//                 io::stdout().flush()?;
+//                 new_process
+//                     .stdin
+//                     .as_mut()
+//                     .unwrap()
+//                     .write(c.to_string().as_bytes())?;
+//             }
+//             _ => {}
+//         }
+//         //see if the process has exited
+//         // if new_process.try_wait().unwrap().is_some() {
+//         //     break;
+//         // }
+//         println!("{:?}", new_process.try_wait());
+        
+
+   // }
+
+
+
     Ok(())
 
     //nuke the below line if everything still works
@@ -319,7 +328,6 @@ fn parse_user_input(user_input: String) -> Vec<String> {
     let mut input_string = String::from(user_input);
 
     //we have one to write to that gets synced to the other one to keep things safe and sound
-    let ref mut writable_user_input_buf: Vec<char> = Vec::new();
     let ref mut user_input_buf: Vec<char> = Vec::new();
     while input_string.len() > 0 {
         match input_string.chars().next().unwrap() {
@@ -382,9 +390,7 @@ fn parse_user_input(user_input: String) -> Vec<String> {
 // Spltting the user input up, running necessary commands, redirecting and piping stdio, general
 // processing
 pub fn handle_input(input_as_vec: Vec<&str>, current_dir: &String) -> String {
-    // every item but the first one
-    //let mut args = parsed_user_input.clone();
-    //args.remove(0);
+
 
     // we want to mutate this at some point
     let mut input_vec: Vec<&str> = input_as_vec.clone();
